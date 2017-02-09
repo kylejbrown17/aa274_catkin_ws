@@ -1,0 +1,4 @@
+<launch>
+	<node pkg="turtlebot" type="supervisor.py" name="turtlebot_controller"/>
+	<node pkg="turtlebot" type="supervisor.py" name="turtlebot_supervisor"/>
+</launch>
