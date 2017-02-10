@@ -16,10 +16,20 @@ class Supervisor:
         self.trans_broad = tf.TransformBroadcaster()
         self.has_tag_location = False
         self.state = "INITIAL_STATE"
+        self.epsilon = 0.3
+        self.agent_x = 0.0
+        self.agent_y = 0.0
+        self.pos_cmd = Float32MultiArray()
+        self.vel_cmd = Float32MultiArray()    
+        self.pos_cmd.data = [0.0, 0.0, 0.0]
+        self.vel_cmd.data = [0.0, 0.0]
+        self.COMMAND_MODE = "VELOCITY_COMMAND"
         rospy.Subscriber('/gazebo/model_states', ModelStates, self.gazebo_callback)
 
     def gazebo_callback(self, data):
         pose = data.pose[data.name.index("mobile_base")]
+        self.agent_x = pose.position.x
+        self.agent_y = pose.position.y
         quaternion = (pose.orientation.x,
                       pose.orientation.y,
                       pose.orientation.z,
@@ -46,59 +56,66 @@ class Supervisor:
             ######################################
             # Your state machine logic goes here #
             ######################################
-        pos_cmd = Float32MultiArray()
-        vel_cmd = Float32MultiArray()    
-        pos_cmd.data = [0.0, 0.0, 0.0]
-        vel_cmd.data = [0.0, 0.0]
-        COMMAND_MODE = "VELOCITY_COMMAND"
+#        pos_cmd = Float32MultiArray()
+#        vel_cmd = Float32MultiArray()    
+#        pos_cmd.data = [0.0, 0.0, 0.0]
+#        vel_cmd.data = [0.0, 0.0]
+#        COMMAND_MODE = "VELOCITY_COMMAND"
         
             ########## Initial State ##########
         if self.state == "INITIAL_STATE":
+            rospy.loginfo(self.state)
             self.state = "LOOKING_FOR_STATION"
                 
             ####### LookingForStation #########
         if self.state == "LOOKING_FOR_STATION":
-            COMMAND_MODE = "VELOCITY_COMMAND"
+            rospy.loginfo(self.state)
+            self.COMMAND_MODE = "VELOCITY_COMMAND"
             V = 0.0
             om = 0.1
             #vel_cmd = Float32MultiArray()
-            vel_cmd.data = [V, om]
+            self.vel_cmd.data = [V, om]
+            
             if self.has_tag_location == True:
                 self.state = "MOVING_TOWARD_STATION" # switch states
             else:
                 self.state = "LOOKING_FOR_STATION" # stay
                     
-            ###### MovingTowardsStation #######
+            ###### MovingTowardStation #######
         if self.state == "MOVING_TOWARD_STATION":
-            COMMAND_MODE = "POSITION_COMMAND"
-            #rospy.loginfo(COMMAND_MODE)
-            # set values of x_g, y_g, th_g - HOW?
+            rospy.loginfo(self.state)
+            self.COMMAND_MODE = "POSITION_COMMAND"
+            # set values of x_g, y_g, th_g - goal in world frame
             x_g = translation[0]
             y_g = translation[1]
             euler = tf.transformations.euler_from_quaternion(rotation)
             th_g = euler[2]
-            #pos_cmd = Float32MultiArray()
-            #pos_cmd.data = np.array([x_g, y_g, th_g])
-            pos_cmd.data = [x_g, y_g, th_g]
-            #rospy.loginfo(COMMAND_MODE)
-            #rospy.loginfo(pos_cmd)
-            if self.has_tag_location == True:
+
+            self.pos_cmd.data = [x_g, y_g, th_g]
+
+            #rospy.loginfo(pos_cmd.data)
+
+            dist_to_charger = (self.agent_x - x_g)**2 + (self.agent_y - y_g)**2
+            #rospy.loginfo("dist_to_charger", dist_to_charger)
+            
+            if dist_to_charger < self.epsilon**2:
+                self.state = "CHARGING"            
+            elif self.has_tag_location == True:
                 self.state = "MOVING_TOWARD_STATION" # stay
             else:
                 self.state = "LOOKING_FOR_STATION" # switch states
-                #if current_position - destination < epsilon:
-                #    state = "CHARGING"
+
                 
             ############# Charging ############
         if self.state == "CHARGING":
-            COMMAND_MODE = "VELOCITY_COMMAND"
-            #vel_cmd.data = np.array([0.0, 0.0])
-            vel_cmd.data = [0.0, 0.0]
-            print "done"
+            rospy.loginfo(self.state)
+            self.COMMAND_MODE = "VELOCITY_COMMAND"
+            self.vel_cmd.data = [0.0, 0.0]
 
-        self.cmd_mode_pub.publish(COMMAND_MODE)
-        self.pos_sp_pub.publish(pos_cmd)
-        self.vel_sp_pub.publish(vel_cmd)
+
+        self.cmd_mode_pub.publish(self.COMMAND_MODE)
+        self.pos_sp_pub.publish(self.pos_cmd)
+        self.vel_sp_pub.publish(self.vel_cmd)
 
         
     def run(self):
