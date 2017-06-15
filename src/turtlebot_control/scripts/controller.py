@@ -12,10 +12,11 @@ class Controller:
 
     def __init__(self):
         rospy.init_node('turtlebot_controller', anonymous=True)
-        rospy.Subscriber('/gazebo/model_states', ModelStates, self.callback)
-        rospy.Subscriber('/turtlebot_control/position_goal', Float32MultiArray, self.pos_callback)
-        rospy.Subscriber('/turtlebot_control/velocity_goal', Float32MultiArray, self.vel_callback)
-        rospy.Subscriber('/turtlebot_control/command_mode', String, self.mode_callback)
+        # rospy.Subscriber('/gazebo/model_states', ModelStates, self.callback)
+        self.trans_listener = tf.TransformListener()
+        rospy.Subscriber('/turtlebot_controller/position_goal', Float32MultiArray, self.pos_callback)
+        rospy.Subscriber('/turtlebot_controller/velocity_goal', Float32MultiArray, self.vel_callback)
+        rospy.Subscriber('/turtlebot_controller/command_mode', String, self.mode_callback)
         self.pub = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=10)
         self.x = 0.0
         self.y = 0.0
@@ -23,7 +24,7 @@ class Controller:
         self.x_g = 1.0
         self.y_g = 1.0
         self.th_g = 1.0
-        self.cmd_mode = "VELOCITY_MODE"
+        self.cmd_mode = "VELOCITY_COMMAND"
         self.V_cmd = 0.0
         self.om_cmd = 0.0
 
@@ -34,34 +35,41 @@ class Controller:
         self.x_g = data.data[0]
         self.y_g = data.data[1]
         self.th_g = data.data[2]
-        # etc
 
     def vel_callback(self, data):
         self.V_cmd = data.data[0]
         self.om_cmd = data.data[1]
 
-    def callback(self, data):
-        pose = data.pose[data.name.index("mobile_base")]
-        twist = data.twist[data.name.index("mobile_base")]
-        self.x = pose.position.x
-        self.y = pose.position.y
-        quaternion = (
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z,
-            pose.orientation.w)
-        euler = tf.transformations.euler_from_quaternion(quaternion)
-        self.theta = euler[2]
+    # Don't need this anymore (since we're not using model states from Gazebo)
+    #def callback(self, data):
+    #    pose = data.pose[data.name.index("mobile_base")]
+    #    twist = data.twist[data.name.index("mobile_base")]
+    #    self.x = pose.position.x
+    #    self.y = pose.position.y
+    #    quaternion = (
+    #        pose.orientation.x,
+    #        pose.orientation.y,
+    #        pose.orientation.z,
+    #        pose.orientation.w)
+    #    euler = tf.transformations.euler_from_quaternion(quaternion)
+    #    self.theta = euler[2]
 
     def get_ctrl_output(self):
-        # use self.x self.y and self.theta to compute the right control input here
+        try:
+            (translation,rotation) = self.trans_listener.lookupTransform("/map", "/base_footprint", rospy.Time(0))
+        except(tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+            # do not update self.x, self.y, self.theta
+            rospy.loginfo("failed to capture transform in get_ctrl_output() - controller.py")
+        else:
+            self.x = translation[0]
+            self.y = translation[1]
+            euler = tf.transformations.euler_from_quaternion(rotation)
+            self.theta = euler[2]
+
         cmd_x_dot = 0.0 # forward velocity
         cmd_theta_dot = 0.0
 
-        # goal values
-        #x_g = 1.0
-        #y_g = 1.0
-        #th_g = 0.0
+        # goal values - x_g,y_g,th_g
         
         def wrapToPi(a):
             if isinstance(a, list):    # backwards compatibility for lists (distinct from np.array)
@@ -81,9 +89,9 @@ class Controller:
         
         V = k1 * rho * np.cos(alpha)
         om = k2 * alpha + k1 * (np.sin(alpha)*np.cos(alpha) / alpha) * ( alpha + k3 * delta)
-        #om = 1.0
+
         # Apply saturation limits
-        if self.cmd_mode == "VELOCITY_MODE":
+        if self.cmd_mode == "VELOCITY_COMMAND":
             V = self.V_cmd
             om = self.om_cmd
         

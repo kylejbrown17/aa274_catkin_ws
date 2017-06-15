@@ -1,0 +1,4 @@
+<launch>
+	<node pkg="turtlebot_control" type="supervisor_constant.py" name="turtlebot_supervisor_constant"/>
+	<node pkg="turtlebot_control" type="navigator.py" name="turtlebot_navigator"/>
+</launch>
